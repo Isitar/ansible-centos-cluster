@@ -1,0 +1,64 @@
+---
+- name: Setup rke hub
+  hosts:
+  - hub
+  vars_files:
+  - ../vars/hub.yml
+
+  handlers:
+  - name: rke_up
+    shell: |
+      set -euo pipefail
+      /usr/local/bin/rke up | tee ~/rke-up.log
+    args:
+      chdir: "{{ rke_config_dir }}"
+
+  pre_tasks:
+  - name: Gather facts from all hosts
+    setup:
+    delegate_to: "{{ item }}"
+    delegate_facts: True
+    when: hostvars[item]['ansible_default_ipv4'] is not defined
+    with_items: "{{ groups['all'] }}"
+
+  tasks:
+  - name: Download RKE binary
+    get_url:
+      url: "{{ rke_binary_url }}"
+      checksum: "{{ rke_binary_checksum }}"
+      dest: /usr/local/bin/rke
+      mode: 755
+    notify: rke_up
+    become: true
+
+  - name: Ensure config directory exists
+    file:
+      path: "{{ rke_config_dir }}"
+      state: directory
+
+  - name: Create/update RKE config file
+    template:
+      src: ../templates/cluster.yml
+      dest: "{{ rke_config_dir }}/cluster.yml"
+      mode: u=rw,g=r,o=
+    notify: rke_up
+
+  - meta: flush_handlers
+
+  - name: Install kubectl
+    get_url:
+      url: https://storage.googleapis.com/kubernetes-release/release/{{ rke_kubernetes_version.split('-', 1)[0] }}/bin/linux/amd64/kubectl
+      dest: /usr/local/bin/kubectl
+      mode: "+rx"
+    become: true
+
+  - name: Ensure $HOME/.kube exists
+    file:
+      path: "{{ ansible_env.HOME }}/.kube"
+      state: directory
+
+  - name: Copy kubeconfig to default location
+    copy:
+      remote_src: yes
+      src: "{{ rke_config_dir }}/kube_config_cluster.yml"
+      dest: "{{ ansible_env.HOME }}/.kube/config"

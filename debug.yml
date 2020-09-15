@@ -1,0 +1,6 @@
+- hosts: hub
+
+  tasks:
+
+
+    - debug: var=role_path

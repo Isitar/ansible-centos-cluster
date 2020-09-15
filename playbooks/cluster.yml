@@ -1,0 +1,202 @@
+---
+- name: Setup nodes
+  hosts:
+  - cluster
+  become: true
+  roles:
+   - geerlingguy.docker
+  handlers:
+    - name: swapoff
+      command: swapoff -a
+    - name: restart_sshd
+      service:
+        name: sshd
+        state: restarted
+    - name: restart_firewalld
+      service:
+        name: firewalld
+        state: restarted
+
+  tasks:
+  # docker additional
+  - name: add user to docker group
+    user:
+      name: "{{ ansible_user }}"
+      groups: docker
+      append: true
+
+  - name: Load kernel modules for RKE
+    modprobe:
+      name: "{{ item }}"
+      state: present
+    with_items:
+      - br_netfilter
+      - ip6_udp_tunnel
+      - ip_set
+      - ip_set_hash_ip
+      - ip_set_hash_net
+      - iptable_filter
+      - iptable_nat
+      - iptable_mangle
+      - iptable_raw
+      - nf_conntrack_netlink
+      - nf_conntrack
+      - nf_conntrack_ipv4
+      - nf_defrag_ipv4
+      - nf_nat
+      - nf_nat_ipv4
+      # - nf_nat_masquerade_ipv4 # maybe works without?
+      - nfnetlink
+      - udp_tunnel
+      - veth
+      - vxlan
+      - x_tables
+      - xt_addrtype
+      - xt_conntrack
+      - xt_comment
+      - xt_mark
+      - xt_multiport
+      - xt_nat
+      - xt_recent
+      - xt_set
+      - xt_statistic
+      - xt_tcpudp
+  - name: Modify sysctl entries
+    sysctl:
+      name: '{{ item.key }}'
+      value: '{{ item.value }}'
+      sysctl_set: yes
+      state: present
+      reload: yes
+    with_items:
+      - {key: net.bridge.bridge-nf-call-ip6tables, value: 1}
+      - {key: net.bridge.bridge-nf-call-iptables,  value: 1}
+      - {key: net.ipv4.ip_forward,  value: 1}
+  # ssh prequisites
+  - name: Add tcpforwarding to nodes
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      state: present
+      regexp: '^AllowTcpForwarding '
+      line: "AllowTcpForwarding yes"
+    notify: restart_sshd
+  # swap handling
+  - name: Remove swap volumes from /etc/fstab
+    lineinfile:
+      path: /etc/fstab
+      state: absent
+      # This should match all lines with an fstype of "swap"
+      regexp: '^[^\s]+\s+[^\s]+\s+swap\s+'
+    notify: swapoff
+  # kernel modules
+
+  # firewall stuff
+  - name: enable firewalld masquerade
+    firewalld:
+      masquerade: yes
+      state: enabled
+      permanent: yes
+      zone: public
+    notify: restart_firewalld
+  - name: enable prometheus ports
+    firewalld:
+      port: 9796/tcp
+      permanent: yes
+      state: enabled
+    notify: restart_firewalld
+
+
+- name: setup etcd nodes
+  hosts:
+    - etcd
+  become: true
+  handlers:
+    - name: restart_firewalld
+      service:
+        name: firewalld
+        state: restarted
+
+  tasks:
+    - name: etcd fireall rules
+      firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: enabled
+      loop:
+        - 2376/tcp
+        - 2379/tcp
+        - 2380/tcp
+        - 8472/udp
+        - 9099/tcp
+        - 10250/tcp
+      notify: restart_firewalld
+
+
+- name: setup control nodes
+  hosts:
+    - control
+  become: true
+  handlers:
+    - name: restart_firewalld
+      service:
+        name: firewalld
+        state: restarted
+  tasks:
+    - name: control fireall rules
+      firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: enabled
+      loop:
+        - 80/tcp
+        - 443/tcp
+        - 2376/tcp
+        - 6443/tcp
+        - 8472/udp
+        - 9099/tcp
+        - 10250/tcp
+        - 10254/tcp
+        - 30000-32767/tcp
+        - 30000-32767/udp
+      notify: restart_firewalld
+
+
+- name: setup worker nodes
+  hosts:
+    - worker
+  handlers:
+    - name: restart_firewalld
+      service:
+        name: firewalld
+        state: restarted
+    - name: reboot
+      reboot:
+  become: true
+  tasks:
+      # requirements for longhorn
+    - name: Install longhorn requirements
+      package:
+        name: curl, curl, iscsi-initiator-utils, util-linux
+        state: latest
+    - name: setup iscsi
+      service:
+          name: iscsid
+          state: started
+          enabled: true
+    - name: fireall rules
+      firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: enabled
+      loop:
+        - 22/tcp
+        - 80/tcp
+        - 443/tcp
+        - 2376/tcp
+        - 8472/udp
+        - 9099/tcp
+        - 10250/tcp
+        - 10254/tcp
+        - 30000-32767/tcp
+        - 30000-32767/udp
+      notify: restart_firewalld

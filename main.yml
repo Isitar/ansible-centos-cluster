@@ -1,0 +1,6 @@
+---
+- name: Setup cluster nodes
+  import_playbook: playbooks/cluster.yml
+
+- name: Setup rke
+  import_playbook: playbooks/hub.yml

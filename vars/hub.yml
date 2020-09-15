@@ -1,0 +1,6 @@
+cluster_name: centos-cluster
+rke_ssh_user: isitar
+rke_kubernetes_version: "v1.18.8-rancher1-1"
+rke_config_dir: "{{ ansible_env.HOME | default(ansible_env.PWD) | default('/root') }}/rke"
+rke_binary_url: https://github.com/rancher/rke/releases/download/v1.1.7/rke_linux-amd64
+rke_binary_checksum: sha256:ebc62233f213762ef9686ac9029638f646269d17843ed7b0e4dbd9df5921b855
